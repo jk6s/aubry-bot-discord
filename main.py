@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import json
 
 #client.run(token) (a la fin tjrs)
-#token = 
+#token =
 
 intents = discord.Intents.default()
 intents.message_content = True
