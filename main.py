@@ -415,4 +415,4 @@ class CloseTicketView(discord.ui.View):
         )
 
 
-client.run(os.getenv("TOKEN"))
+bot.run(os.getenv("TOKEN"))
