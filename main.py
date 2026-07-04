@@ -4,9 +4,7 @@ import os
 from datetime import datetime, timezone
 import json
 
-client.run(os.getenv("TOKEN"))
-
-#client.run(token)
+#client.run(token) (a la fin tjrs)
 #token = 
 
 intents = discord.Intents.default()
@@ -415,3 +413,6 @@ class CloseTicketView(discord.ui.View):
             f"✅ Utilisateur ajouté.",
             ephemeral=True
         )
+
+
+client.run(os.getenv("TOKEN"))
