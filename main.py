@@ -203,6 +203,17 @@ async def on_message(message):
         await bot.process_commands(message)
         return
 
+    role_tickets = discord.utils.get(message.guild.roles, name="<tickets>")
+
+    has_ticket_role = (
+        role_tickets is not None
+        and role_tickets in message.author.roles
+    )
+
+    if has_ticket_role and message.channel.name.startswith("ticket-"):
+        await bot.process_commands(message)
+        return
+    
     if LINK_REGEX.search(message.content):
 
         contenu = message.content
