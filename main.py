@@ -13,7 +13,7 @@ import asyncio
 
 LINK_REGEX = re.compile(r"(https?://|www\.|discord\.gg/|discord\.com/invite/)")
 
-#token = 
+#token = ""
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -76,23 +76,23 @@ async def log_message_tickets(bot, guild, message):
 
 @bot.event
 async def on_ready():
-    guild = bot.guilds[0]
-    date = datetime.now(timezone.utc)
+    for guild in bot.guilds:
+        date = datetime.now(timezone.utc)
 
-    bot.add_view(TicketView())
+        bot.add_view(TicketView())
 
-    init_db()
-    bot.loop.create_task(auto_backup())
-    print(f"\n\n=======================\n{date}\n\n{bot.user} est connecté !\n+Base SQLite initialisée\n|||||||||||||||||||||||\n-")
-    await log_message_bot(bot,guild,f">>> ==========================\n{date}\n\n{bot.user} est connecté !\n+Base SQLite initialisée\n==========================\n|||")
+        init_db()
+        bot.loop.create_task(auto_backup())
+        print(f"\n\n=======================\n{date}\n\n{bot.user} est connecté !\n+Base SQLite initialisée\n|||||||||||||||||||||||\n-")
+        await log_message_bot(bot,guild,f">>> ==========================\n{date}\n\n{bot.user} est connecté !\n+Base SQLite initialisée\n==========================\n|||")
 
 @bot.event
 async def on_disconnect():
-    guild = bot.guilds[0]
-    date = datetime.now(timezone.utc)
+    for guild in bot.guilds:
+        date = datetime.now(timezone.utc)
 
-    print(f"--\n>>> {bot.user} est déconnecté\n--")
-    await log_message_bot(bot, guild, f">>> {date}\n\n--\n>>> {bot.user} est déconnecté\n--")
+        print(f"--\n>>> {bot.user} est déconnecté\n--")
+        await log_message_bot(bot, guild, f">>> {date}\n\n--\n>>> {bot.user} est déconnecté\n--")
 
 
 
@@ -123,12 +123,12 @@ async def nonpourquoitudiscaslp(ctx):
     await ctx.send("fdp")
 
 @bot.command()
-async def depuis(ctx, membre: discord.Member = None):
-    if membre is None:
-        membre = ctx.author
+async def depuis(ctx, member: discord.Member = None):
+    if member is None:
+        member = ctx.author
 
-    datejoin = membre.joined_at.strftime("%d/%m/%Y à %H:%M")
-    await ctx.send(f"{membre.display_name} a rejoint le serveur le : {datejoin}")
+    datejoin = member.joined_at.strftime("%d/%m/%Y à %H:%M")
+    await ctx.send(f"{member.display_name} a rejoint le serveur le : {datejoin}")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
@@ -465,28 +465,103 @@ async def on_member_join(member):
             f">>> ------------------------------------\n{date}\n\n{member} a rejoint le serveur\n{member.guild.member_count} membres\n------------------------------------\n|")
         await channel.send(embed=embed)
 
+#ban/deban/kick
+
+@bot.event
+async def on_member_ban(guild, user):
+    salon = discord.utils.get(guild.text_channels, name="logs-join-leave-member")
+    date = datetime.now(timezone.utc)
+
+    if user.joined_at is None:
+        return
+    
+    duration = datetime.now(timezone.utc) - user.joined_at
+
+    datejoin = user.joined_at
+    date = datetime.now(timezone.utc)
+
+    days = duration.days
+    hours = duration.seconds //3600
+    minutes = (duration.seconds // 60) % 60
+    seconds = duration.seconds - (((duration.seconds // 60) % 60) * 60)
+    totalseconds = duration.seconds
+
+    if not salon:
+        return
+    
+    async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.ban):
+        if entry.target.id == user.id:
+            print(f"--> {date}\n\n{user} s'est fait ban par {entry.user}\nRaison : {entry.reason or 'Aucune raison'}\nRejoint : {datejoin}\nLà depuis {days}j {hours}h {minutes}m {seconds}s\n{totalseconds}s au total\n{user.guild.member_count} membres à présent\n")
+            await log_message_JL(bot, guild, f">>> --------------------------\n{date}\n\n{user} ({user.mention}) s'est fait ban par {entry.user}\nRaison : {entry.reason or 'Aucune raison'}\nRejoint : {datejoin}\nLà depuis {days}j {hours}h {minutes}m {seconds}s\n{totalseconds}s au total\n{user.guild.member_count} membres à présent\n--------------------------")
+            return
+        
+@bot.event
+async def on_member_unban(guild, user):
+    salon = discord.utils.get(guild.text_channels, name="logs-join-leave-member")
+    date = datetime.now(timezone.utc)
+
+    if user.joined_at is None:
+        return
+
+    duration = datetime.now(timezone.utc) - user.joined_at
+
+    date = datetime.now(timezone.utc)
+
+
+    if not salon:
+        return
+    
+    async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.ban):
+        if entry.target.id == user.id:
+
+            print(f"--> {date}\n\n{user} s'est fait deban par {entry.user}\n\n{user.guild.member_count} membres à présent\n")
+            await log_message_JL(f">>> --------------------------\n{date}\n\n**{user}** ({user.mention}) a été débanni.")
 
 @bot.event
 async def on_member_remove(member):
+    date = datetime.now(timezone.utc)
+
+    if member.joined_at is None:
+        return
+
+    duration = datetime.now(timezone.utc) - member.joined_at
+
+    datejoin = member.joined_at
+    date = datetime.now(timezone.utc)
+
+    days = duration.days
+    hours = duration.seconds //3600
+    minutes = (duration.seconds // 60) % 60
+    seconds = duration.seconds - (((duration.seconds // 60) % 60) * 60)
+    totalseconds = duration.seconds
+
+
+    await asyncio.sleep(1)  # Laisse le temps aux logs d'audit de se mettre à jour
+
+    #ban
+    async for entry in member.guild.audit_logs(limit=1, action=discord.AuditLogAction.ban):
+        if entry.target.id == member.id:
+            return  
+
+    #kick
+    async for entry in member.guild.audit_logs(limit=1, action=discord.AuditLogAction.kick):
+        if entry.target.id == member.id:
+            salon = member.guild.get_channel(1523023647781027921)
+            if salon:
+                print(f"--> {date}\n\n{member} s'est fait kick par {entry.user}\nRaison : {entry.reason or 'Aucune raison'}\nRejoint : {datejoin}\nLà depuis {days}j {hours}h {minutes}m {seconds}s\n{totalseconds}s au total\n{member.guild.member_count} membres à présent\n")
+                await log_message_JL(bot, guild, f">>> --------------------------\n{date}\n\n{member} ({member.mention}) s'est fait kick par {entry.user}\nRaison : {entry.reason or 'Aucune raison'}\nRejoint : {datejoin}\nLà depuis {days}j {hours}h {minutes}m {seconds}s\n{totalseconds}s au total\n{member.guild.member_count} membres à présent\n--------------------------")
+
+            return
+
+    #juste leave
+    salon = member.guild.get_channel(1523023647781027921)
     guild = member.guild
-
-    if member.joined_at:
-        duration = datetime.now(timezone.utc) - member.joined_at
-
-        datejoin = member.joined_at
-        date = datetime.now(timezone.utc)
-
-        days = duration.days
-        hours = duration.seconds //3600
-        minutes = (duration.seconds // 60) % 60
-        seconds = duration.seconds - (((duration.seconds // 60) % 60) * 60)
-        totalseconds = duration.seconds
-
-        print(f"--> {date}, {member} a quitte le serveur \nRejoint : {datejoin}\nLà depuis {days}j {hours}h {minutes}m {seconds}s  ({totalseconds}s au total), {member.guild.member_count} membres")
+    if salon:
+        print(f"--> {date}\n\n{member} a quitte le serveur \nRejoint : {datejoin}\nLà depuis {days}j {hours}h {minutes}m {seconds}s  ({totalseconds}s au total), {member.guild.member_count} membres")
         await log_message_JL(
             bot,
             guild, 
-            f">>> --------------------------\n{date}\n\n{member} a quitte le serveur\nRejoint : {datejoin}\nLà depuis {days}j {hours}h {minutes}m {seconds}s\n{totalseconds}s au total\n{member.guild.member_count} membres à présent\n--------------------------")
+            f">>> --------------------------\n{date}\n\n{member} ({member.mention}) a quitte le serveur\nRejoint : {datejoin}\nLà depuis {days}j {hours}h {minutes}m {seconds}s\n{totalseconds}s au total\n{member.guild.member_count} membres à présent\n--------------------------")
 
 
 
@@ -835,7 +910,14 @@ async def on_message(message):
     await bot.process_commands(message)
 
 
-#bot.run(token) #(toujours a la fin)
+
+
+
 
 bot.run(os.getenv("TOKEN"))
+
+
+#bot.run(token) #(toujours a la fin)
+
+
 
