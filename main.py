@@ -1,9 +1,15 @@
+
 import discord
 from discord.ext import commands
 import os
 from datetime import datetime, timezone
 import json
 import re
+import sqlite3
+import time
+import random
+import shutil
+import asyncio
 
 LINK_REGEX = re.compile(r"(https?://|www\.|discord\.gg/|discord\.com/invite/)")
 
@@ -15,6 +21,26 @@ intents.members = True
 intents.voice_states = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
+cooldowns = {}
+DB_PATH = "data/levels.db"
+if not os.path.exists("data"):
+    os.makedirs("data")
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS levels (
+        user_id TEXT PRIMARY KEY,
+        xp INTEGER DEFAULT 0,
+        level INTEGER DEFAULT 1
+    )
+    """)
+
+    conn.commit()
+    conn.close()
+
 
 
 #------------------MESSAGES LOG CHANNEL-----------------------------
@@ -54,9 +80,11 @@ async def on_ready():
     date = datetime.now(timezone.utc)
 
     bot.add_view(TicketView())
-    print(f"\n\n=======================\n{date}\n\n{bot.user} est connecté !\n|||||||||||||||||||||||\n-")
-    await log_message_bot(bot,guild,f">>> ==========================\n{date}\n\n{bot.user} est connecté !\n==========================\n|||")
 
+    init_db()
+    bot.loop.create_task(auto_backup())
+    print(f"\n\n=======================\n{date}\n\n{bot.user} est connecté !\n+Base SQLite initialisée\n|||||||||||||||||||||||\n-")
+    await log_message_bot(bot,guild,f">>> ==========================\n{date}\n\n{bot.user} est connecté !\n+Base SQLite initialisée\n==========================\n|||")
 
 @bot.event
 async def on_disconnect():
@@ -186,7 +214,150 @@ async def closeticket(ctx):
 
     await channel.delete()    
 
-    
+@bot.command()
+async def rank(ctx, member: discord.Member = None):
+
+    member = member or ctx.author
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute(
+        "SELECT xp, level FROM levels WHERE user_id = ?",
+        (str(member.id),)
+    )
+
+    result = c.fetchone()
+    conn.close()
+
+    if not result:
+        await ctx.send("❌ Aucun niveau trouvé.")
+        return
+
+    xp, level = result
+
+    await ctx.send(
+        f"📊 {member.display_name}\n"
+        f"⭐ Niveau : {level}\n"
+        f"📈 XP : {xp}"
+    )
+
+@bot.command()
+async def leaderboard(ctx):
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute("""
+        SELECT user_id, level, xp
+        FROM levels
+        ORDER BY level DESC, xp DESC
+        LIMIT 10
+    """)
+
+    data = c.fetchall()
+    conn.close()
+
+    embed = discord.Embed(
+        title="🏆 Leaderboard",
+        color=discord.Color.gold()
+    )
+
+    for i, (user_id, level, xp) in enumerate(data, start=1):
+        user = await bot.fetch_user(int(user_id))
+
+        embed.add_field(
+            name=f"{i}. {user.name}",
+            value=f"Niveau {level} - XP {xp}",
+            inline=False
+        )
+
+    await ctx.send(embed=embed)
+
+@bot.command()
+async def givexp(ctx, member: discord.Member = None, amount: int = None):
+
+    if not ctx.author.guild_permissions.administrator:
+        await ctx.send("❌ Tu n'as pas la permission d'utiliser cette commande")
+        return
+
+    if amount is None:
+        await ctx.send("❌ Tu dois préciser une quantité d'XP.")
+        return
+
+    member = member or ctx.author
+    user_id = str(member.id)
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute("SELECT xp, level FROM levels WHERE user_id = ?", (user_id,))
+    result = c.fetchone()
+
+    if result is None:
+        xp = amount
+        level = 1
+        c.execute(
+            "INSERT INTO levels (user_id, xp, level) VALUES (?, ?, ?)",
+            (user_id, xp, level)
+        )
+    else:
+        xp, level = result
+        xp += amount
+
+        c.execute(
+            "UPDATE levels SET xp = ? WHERE user_id = ?",
+            (xp, user_id)
+        )
+
+    conn.commit()
+    conn.close()
+
+    await ctx.send(
+        f"✅ {amount} XP ajouté à {member.mention}"
+    )
+
+@bot.command()
+async def setlevel(ctx, member: discord.Member = None, level: int = None):
+
+    if not ctx.author.guild_permissions.administrator:
+        await ctx.send("❌ Tu n'as pas la permission d'utiliser cette commande")
+        return
+
+    if level is None:
+        await ctx.send("❌ Tu dois préciser un niveau.")
+        return
+
+    member = member or ctx.author
+    user_id = str(member.id)
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute("SELECT xp FROM levels WHERE user_id = ?", (user_id,))
+    result = c.fetchone()
+
+    if result is None:
+        xp = 0
+        c.execute(
+            "INSERT INTO levels (user_id, xp, level) VALUES (?, ?, ?)",
+            (user_id, xp, level)
+        )
+    else:
+        xp = 0
+        c.execute(
+            "UPDATE levels SET xp = ?, level = ? WHERE user_id = ?",
+            (xp, level, user_id)
+        )
+
+    conn.commit()
+    conn.close()
+
+    await ctx.send(
+        f"⭐ {member.mention} est maintenant niveau {level}"
+    )
+
+
 
 #------------------ANTILINK-----------------------------
 
@@ -213,7 +384,7 @@ async def on_message(message):
     if has_ticket_role and message.channel.name.startswith("ticket-"):
         await bot.process_commands(message)
         return
-    
+
     if LINK_REGEX.search(message.content):
 
         contenu = message.content
@@ -325,8 +496,7 @@ async def on_member_remove(member):
 async def on_voice_state_update(member, before, after):
     guild = member.guild
 
-    create_channel = discord.utils.get(guild.voice_channels, name="Créez votre salon")\
-
+    create_channel = discord.utils.get(guild.voice_channels, name="Créez votre salon")
     category = discord.utils.get(guild.categories, name="🎙️ Vocal")
 
     if after.channel == create_channel:
@@ -344,39 +514,39 @@ async def on_voice_state_update(member, before, after):
         )
 
         await member.move_to(channel)
-
-
-    if before.channel:
+        
+    if before.channel != after.channel:
+        if after.channel and after.channel != create_channel:
+            print(f"--> {datetime.now(timezone.utc)} {member} a rejoint : {after.channel.name}")
+            await log_message_voc(
+                bot,
+                guild, 
+                f">>> __________________________\n{datetime.now(timezone.utc)}\n\n{member} a rejoint : {after.channel.mention}")
+        
+    if before.channel and before.channel != after.channel:
         print(f"\n--> {datetime.now(timezone.utc)} {member} a quitté : {before.channel.name}")
         await log_message_voc(
             bot,
-            guild, 
-            f">>> __________________________\n{datetime.now(timezone.utc)}\n\n{member} a quitté : {before.channel.name}")
+            guild,
+            f">>> __________________________\n{datetime.now(timezone.utc)}\n\n{member} a quitté : {before.channel.mention}"
+        )
         
+    if before.channel and before.channel.name.startswith("🔊 vocal-"):
+        if len(before.channel.members) == 0:
+            try:
+                await before.channel.delete()
+                print(f"supprimé : {before.channel.name}")
 
-    elif after.channel and after.channel != create_channel:
-        print(f"--> {datetime.now(timezone.utc)} {member} a rejoint : {after.channel.name}")
-        await log_message_voc(
-            bot,
-            guild, 
-            f">>> __________________________\n{datetime.now(timezone.utc)}\n\n{member} a rejoint : {after.channel.name}")
-        
-
-    channel = before.channel
-
-    if channel and channel.name.startswith("🔊 vocal-"):
-        try:
-            if len(channel.members) == 0:
-                await channel.delete()
-                print(f"--> {datetime.now(timezone.utc)} supprimé : {channel.name}")
                 await log_message_voc(
                     bot,
-                    guild, 
-                    f">>> __________________________\n{datetime.now(timezone.utc)}\n\nSupprimé : {channel.name}")
-                
-        except discord.NotFound:
-            pass
-
+                    guild,
+                    f">>> __________________________\n"
+                    f"{datetime.now(timezone.utc)}\n\n"
+                    f"Supprimé : {before.channel.name}"
+                )
+            except discord.NotFound:
+                pass
+    
 
 
 #------------------TICKETS-----------------------------
@@ -567,7 +737,105 @@ class CloseTicketView(discord.ui.View):
 
 
 
+#------------------NIVEAUX-----------------------------
+
+def backup_db():
+    if not os.path.exists("backups"):
+        os.makedirs("backups")
+
+    date = datetime.now().strftime("%d-%m-%Y_%Hh%M")
+
+    shutil.copy(
+        DB_PATH,
+        f"backups/levels_{date}.db"
+    )
+
+async def auto_backup():
+    while True:
+        backup_db()
+        await asyncio.sleep(3600)  
+
+def add_xp(user_id):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute("SELECT xp, level FROM levels WHERE user_id = ?", (user_id,))
+    result = c.fetchone()
+
+    xp_gain = random.randint(9, 12)
+    leveled_up = False
+
+    if result is None:
+        xp = xp_gain
+        level = 1
+
+        c.execute(
+            "INSERT INTO levels (user_id, xp, level) VALUES (?, ?, ?)",
+            (user_id, xp, level)
+        )
+
+    else:
+        xp, level = result
+        xp += xp_gain
+
+        xp_needed = level * 100
+
+        if xp >= xp_needed:
+            xp -= xp_needed
+            level += 1
+            leveled_up = True
+
+        c.execute(
+            "UPDATE levels SET xp = ?, level = ? WHERE user_id = ?",
+            (xp, level, user_id)
+        )
+
+    conn.commit()
+    conn.close()
+
+    return xp, level, leveled_up
+
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+
+    user_id = str(message.author.id)
+    now = time.time()
+
+    # anti spam XP
+    if user_id in cooldowns:
+        if now - cooldowns[user_id] < 5:
+            await bot.process_commands(message)
+            return
+
+    cooldowns[user_id] = now
+
+    xp, level, leveled_up = add_xp(user_id)
+
+    if leveled_up:
+        
+        niveaux_channel = 1486065141966438462
+        channel = bot.get_channel(niveaux_channel)
+
+        if channel:
+            embed = discord.Embed(
+                title="🎉 Level Up !",
+                description=(
+                    f"👤 {message.author.mention}\n"
+                    f"⭐ Nouveau niveau : **{level}**"
+                ),
+                color=discord.Color.gold()
+            )
+
+            embed.set_thumbnail(url=message.author.display_avatar.url)
+
+            await channel.send(embed=embed)
+
+    await bot.process_commands(message)
+
 
 #bot.run(token) #(toujours a la fin)
 
 bot.run(os.getenv("TOKEN"))
+
