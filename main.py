@@ -14,7 +14,7 @@ import asyncio
 
 LINK_REGEX = re.compile(r"(https?://|www\.|discord\.gg/|discord\.com/invite/)")
 
-#token = "d"
+#token = ""
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -44,13 +44,15 @@ def init_db():
     conn.commit()
     conn.close()
 
-def backup_db():
-    if os.path.exists(DB_PATH):
-        shutil.copy(DB_PATH, BACKUP)
 
-def restore_db():
-    if os.path.exists(BACKUP) and not os.path.exists(DB_PATH):
-        shutil.copy(BACKUP, DB_PATH)
+from discord import app_commands
+
+@bot.tree.command(name="say", description="Envoie un message dans un salon")
+@app_commands.checks.has_permissions(administrator=True)
+async def say(interaction: discord.Interaction, salon: discord.TextChannel, message: str):
+    message = message.replace("\\n", "\n")
+    await salon.send(message)
+    await interaction.response.send_message("Message envoyé ✅", ephemeral=True)
 
 
 
@@ -87,7 +89,22 @@ async def log_message_tickets(bot, guild, message):
 
 @bot.event
 async def on_ready():
+    GUILD_ID = discord.Object(id=1486065140746027180)
+
     for guild in bot.guilds:
+        await bot.tree.sync(guild=GUILD_ID)
+        print("Sync OK serveur")
+        await log_message_bot(bot, guild, f">>> +++++++++++++\nSync OK serveur\n+++++++++++++")
+
+    for guild in bot.guilds:
+        try:
+            synced = await bot.tree.sync()
+            print(f"Synced {len(synced)} command(s)")
+            await log_message_bot(bot, guild, f">>> _____Synced {len(synced)} command(s)\n_____")
+        except Exception as e:
+            print(e)
+    
+
         date = datetime.now(timezone.utc)
 
         bot.add_view(TicketView())
