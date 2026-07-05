@@ -11,9 +11,10 @@ import random
 import shutil
 import asyncio
 
+
 LINK_REGEX = re.compile(r"(https?://|www\.|discord\.gg/|discord\.com/invite/)")
 
-#token = ""
+#token = "d"
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -23,8 +24,10 @@ intents.voice_states = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 cooldowns = {}
 DB_PATH = "data/levels.db"
+BACKUP = "lvels_backup.db"
 if not os.path.exists("data"):
     os.makedirs("data")
+
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -40,6 +43,14 @@ def init_db():
 
     conn.commit()
     conn.close()
+
+def backup_db():
+    if os.path.exists(DB_PATH):
+        shutil.copy(DB_PATH, BACKUP)
+
+def restore_db():
+    if os.path.exists(BACKUP) and not os.path.exists(DB_PATH):
+        shutil.copy(BACKUP, DB_PATH)
 
 
 
@@ -357,6 +368,29 @@ async def setlevel(ctx, member: discord.Member = None, level: int = None):
         f"⭐ {member.mention} est maintenant niveau {level}"
     )
 
+@bot.command()
+@commands.has_permissions(ban_members=True)
+async def deban(ctx, user_id: int, *, reason=None):
+    guild = ctx.guild
+    date = datetime.now(timezone.utc)
+
+    try:
+        user = await bot.fetch_user(user_id)
+        await guild.unban(user, reason=reason)
+        await ctx.send(f"✅ {user} a été débanni.")
+
+        log_channel = discord.utils.get(guild.text_channels, name="logs-join-leave-member")
+
+        if log_channel:
+            await log_message_JL(bot, guild, f">>> COMMANDE DEBAN--------\n{date}\n\n**{user}** {user.mention} ({user.id})\nPar : {ctx.author} {ctx.author.mention} ({ctx.author.id})\nRaison : {reason or 'Aucune raison'}\n____")
+
+    except discord.NotFound:
+        await ctx.send("❌ Cet utilisateur n'est pas banni.")
+    except discord.Forbidden:
+        await ctx.send("❌ Je n'ai pas la permission de débannir.")
+    except Exception as e:
+        await ctx.send(f"❌ Erreur : {e}")
+
 
 
 #------------------ANTILINK-----------------------------
@@ -472,27 +506,13 @@ async def on_member_ban(guild, user):
     salon = discord.utils.get(guild.text_channels, name="logs-join-leave-member")
     date = datetime.now(timezone.utc)
 
-    if user.joined_at is None:
-        return
-    
-    duration = datetime.now(timezone.utc) - user.joined_at
-
-    datejoin = user.joined_at
-    date = datetime.now(timezone.utc)
-
-    days = duration.days
-    hours = duration.seconds //3600
-    minutes = (duration.seconds // 60) % 60
-    seconds = duration.seconds - (((duration.seconds // 60) % 60) * 60)
-    totalseconds = duration.seconds
-
     if not salon:
         return
     
     async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.ban):
         if entry.target.id == user.id:
-            print(f"--> {date}\n\n{user} s'est fait ban par {entry.user}\nRaison : {entry.reason or 'Aucune raison'}\nRejoint : {datejoin}\nLà depuis {days}j {hours}h {minutes}m {seconds}s\n{totalseconds}s au total\n{user.guild.member_count} membres à présent\n")
-            await log_message_JL(bot, guild, f">>> --------------------------\n{date}\n\n{user} ({user.mention}) s'est fait ban par {entry.user}\nRaison : {entry.reason or 'Aucune raison'}\nRejoint : {datejoin}\nLà depuis {days}j {hours}h {minutes}m {seconds}s\n{totalseconds}s au total\n{user.guild.member_count} membres à présent\n--------------------------")
+            print(f"--> {date}\n\n{user} s'est fait ban par {entry.user}\nRaison : {entry.reason or 'Aucune raison'}\n{guild.member_count} membres à présent\n")
+            await log_message_JL(bot, guild, f">>> -------------BAN-------------\n{date}\n\n{user} ({user.mention}) s'est fait ban par {entry.user}\nRaison : {entry.reason or 'Aucune raison'}\n{guild.member_count} membres à présent\n--------------------------")
             return
         
 @bot.event
@@ -500,22 +520,14 @@ async def on_member_unban(guild, user):
     salon = discord.utils.get(guild.text_channels, name="logs-join-leave-member")
     date = datetime.now(timezone.utc)
 
-    if user.joined_at is None:
-        return
-
-    duration = datetime.now(timezone.utc) - user.joined_at
-
-    date = datetime.now(timezone.utc)
-
-
     if not salon:
         return
     
     async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.ban):
         if entry.target.id == user.id:
 
-            print(f"--> {date}\n\n{user} s'est fait deban par {entry.user}\n\n{user.guild.member_count} membres à présent\n")
-            await log_message_JL(f">>> --------------------------\n{date}\n\n**{user}** ({user.mention}) a été débanni.")
+            print(f"--> {date}\n\n{user} s'est fait deban par {entry.user}\n\n{guild.member_count} membres à présent\n")
+            await log_message_JL(bot, guild, f">>> 🔓UNBAN================\n{date}\n\n**{user}** {user.mention} ({user.id}\n--------------------------")
 
 @bot.event
 async def on_member_remove(member):
@@ -914,10 +926,10 @@ async def on_message(message):
 
 
 
-bot.run(os.getenv("TOKEN"))
+
 
 
 #bot.run(token) #(toujours a la fin)
 
-
+bot.run(os.getenv("TOKEN"))
 
