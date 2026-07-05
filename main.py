@@ -3,9 +3,11 @@ from discord.ext import commands
 import os
 from datetime import datetime, timezone
 import json
+import re
 
-#client.run(token) (a la fin tjrs)
-#token =
+LINK_REGEX = re.compile(r"(https?://|www\.|discord\.gg/|discord\.com/invite/)")
+
+#token = 
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -13,7 +15,6 @@ intents.members = True
 intents.voice_states = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
-
 
 
 #------------------MESSAGES LOG CHANNEL-----------------------------
@@ -108,6 +109,145 @@ async def ouvrirunticket(ctx):
         "🎟️ **Support Tickets**\n\nClique sur le bouton pour ouvrir un ticket.\n\n",
         view=TicketView()
     )
+
+@bot.command()
+async def closeticket(ctx):
+
+    channel = ctx.channel
+    guild = ctx.guild
+    channel_name = channel.name
+
+    # Vérifie que la commande est utilisée dans un ticket
+    if not ctx.channel.name.startswith("ticket-"):
+        await ctx.send("❌ Cette commande ne peut être utilisée que dans un ticket.")
+        return
+
+    role_tickets = discord.utils.get(ctx.guild.roles, name="<tickets>")
+
+    has_ticket_role = (
+        role_tickets is not None
+        and role_tickets in ctx.author.roles
+    )
+
+    if (
+        not has_ticket_role
+        and not ctx.author.guild_permissions.manage_channels
+    ):
+        await ctx.send("❌ Tu n'as pas la permission de fermer ce ticket.")
+        return
+
+    await ctx.send("🔒 Fermeture du ticket...")
+
+    messages = []
+
+    async for msg in channel.history(limit=200, oldest_first=True):
+        messages.append({
+            "author": str(msg.author),
+            "content": msg.content,
+            "time": str(msg.created_at)
+        })
+
+    now = datetime.now(timezone.utc)
+    formatted_date = now.strftime("%d.%m.%y_%Hh%M")
+
+    data = {
+        "channel_name": channel.name,
+        "closed_by": str(ctx.author),
+        "closed_at": str(datetime.now(timezone.utc)),
+        "messages": messages
+    }
+        
+    if not os.path.exists("tickets_backup"):
+        os.makedirs("tickets_backup")
+
+    filename = f"{channel.name}_{formatted_date}.json"
+    file_path = os.path.join("tickets_backup", filename)
+
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+        
+    print(f"--> {datetime.now(timezone.utc)} Ticket fermé : {channel_name} par {ctx.author}")
+
+    await log_message_tickets(
+        bot,
+        guild, 
+        f">>> ---__CLOSE__---\n{datetime.now(timezone.utc)}\n\nTicket fermé : {channel_name}\nPar {ctx.author}"
+    )
+
+    log_channel = discord.utils.get(guild.text_channels, name="backup-tickets")
+
+    if log_channel is None:
+        print("Salon de logs introuvable.")
+    else:
+        await log_channel.send(
+            content=f"📁 Backup du ticket **{channel.name}** fermé par {ctx.author.mention}",
+            file=discord.File(file_path)
+        )
+
+    await channel.delete()    
+
+    
+
+#------------------ANTILINK-----------------------------
+
+LINK_REGEX = re.compile(r"(https?://|www\.|discord\.gg/|discord\.com/invite/)")
+
+LOG_CHANNEL_ID = 1523109860974002258
+
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+
+    if message.author.guild_permissions.administrator:
+        await bot.process_commands(message)
+        return
+
+    if LINK_REGEX.search(message.content):
+
+        contenu = message.content
+        salon = message.channel
+
+        await message.delete()
+
+        log_channel = message.guild.get_channel(LOG_CHANNEL_ID)
+
+        if log_channel:
+            embed = discord.Embed(
+                title="🚫 Lien bloqué",
+                color=discord.Color.red()
+            )
+
+            embed.add_field(
+                name="👤 Auteur",
+                value=message.author.mention,
+                inline=False
+            )
+
+            embed.add_field(
+                name="📍 Salon",
+                value=salon.mention,
+                inline=False
+            )
+
+            embed.add_field(
+                name="🔗 Message",
+                value=f"```{contenu}```",
+                inline=False
+            )
+
+            embed.set_thumbnail(url=message.author.display_avatar.url)
+
+            await log_channel.send(embed=embed)
+
+        await message.channel.send(
+            f"{message.author.mention} ❌ Les liens sont interdits sur ce serveur.",
+            delete_after=5
+        )
+
+        return
+
+    await bot.process_commands(message)
 
 
 
@@ -277,7 +417,7 @@ class TicketView(discord.ui.View):
         await log_message_tickets(
             bot,
             guild, 
-            f">>> ===__OPEN__===\n{datetime.now(timezone.utc)}\n\nTicket créé : {channel.name}\nPar {member} | ID: {channel.id}"
+            f">>> ===__OPEN__===\n{datetime.now(timezone.utc)}\n\nTicket créé : {channel.name}\nPar {member}\nSalon : {channel.mention}\nID: {channel.id}"
         )
 
         await interaction.followup.send(
@@ -414,5 +554,9 @@ class CloseTicketView(discord.ui.View):
             ephemeral=True
         )
 
+
+
+
+#bot.run(token) #(toujours a la fin)
 
 bot.run(os.getenv("TOKEN"))
