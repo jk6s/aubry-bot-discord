@@ -24,7 +24,7 @@ intents.voice_states = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 cooldowns = {}
 DB_PATH = "data/levels.db"
-BACKUP = "lvels_backup.db"
+BACKUP = "levels_backup.db"
 if not os.path.exists("data"):
     os.makedirs("data")
 
@@ -125,6 +125,32 @@ async def on_disconnect():
 
 
 #------------------COMMANDES DU BOT-----------------------------!ping, !nonpourquoitudiscaslp, !datejoin @membre, !ouvrirunticket etc...
+
+@bot.command()
+async def command(ctx, member: discord.Member = None):
+    
+    embed = discord.Embed(
+    title="VOICI TOUTES LES COMMANDES DU SERVEUR :",
+    description=(
+            "__💬COMMANDES MESSAGES :__\n\n"
+            "--> !ping\n"
+            "--> !nonpourquoitudiscaslp\n"
+            "--> !ntmmmeaubry\n"
+            "--> !soleilterre\n"
+            "--> !ntmlebot\n\n"
+            "__🛠️COMMANDES__\n\n"
+            "➡️ !depuis @...[optionnel] : vous dira la date exact à laquelle vous (ou quelqu'un d'autre) avez rejoint le serveur\n\n"
+            "➡️ !rank @...[optionnel] : vous dira votre rank actuel ou celui de quelqu'un d'autre\n\n"
+            "➡️ leaderboard : vous montrera le leaderboard du système de niveau (non-accurate je le rappelle)\n\n"
+            "➡️ !givexp @... 145 : permet d'ajouter un nombre d'xp choisi à quelqu'un (seulement pour les modos)\n\n"
+            "➡️ !setlevel @... 11 : permet de mettre quelqu'un à un niveau précis, son xp sera reset à 0 (seulement pour les modos)\n\n"
+            "➡️ !ouvrirunticket : permet de faire apparaitre le message pour ouvrir un ticket (seulement pour les modos)\n\n"
+            "➡️ !closeticket : à l'intérieur d'un ticket, permet de fermer un ticket (seulement pour les modos)\n\n"
+            "➡️ !deban id : permet de deban un membre grace à son id (seulement pour les modos)\n"),
+
+    color=discord.Color.from_rgb(255, 255, 255))
+
+    await ctx.send(embed=embed)
 
 @bot.command()
 async def ping(ctx):
@@ -702,7 +728,7 @@ class TicketView(discord.ui.View):
         await log_message_tickets(
             bot,
             guild, 
-            f">>> ===__OPEN__===\n{datetime.now(timezone.utc)}\n\nTicket créé : {channel.name}\nPar {member}\nSalon : {channel.mention}\nID: {channel.id}"
+            f">>> ===__OPEN__===\n{datetime.now(timezone.utc)}\n\nTicket créé : {channel.name}\nPar {member}  {member.mention} ({member.id})\nSalon : {channel.mention}\nID salon: {channel.id}"
         )
 
         await interaction.followup.send(
@@ -777,7 +803,7 @@ class CloseTicketView(discord.ui.View):
         await log_message_tickets(
             bot,
             guild, 
-            f">>> ---__CLOSE__---\n{datetime.now(timezone.utc)}\n\nTicket fermé : {channel_name}\nPar {interaction.user}"
+            f">>> ---__CLOSE__---\n{datetime.now(timezone.utc)}\n\nTicket fermé : {channel_name}\nPar {interaction.user} {interaction.user.mention} ({interaction.user.id})"
         )
 
         log_channel = discord.utils.get(guild.text_channels, name="backup-tickets")
