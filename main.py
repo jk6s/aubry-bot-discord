@@ -1,6 +1,7 @@
 
 import discord
 from discord.ext import commands
+from discord import app_commands
 import os
 from datetime import datetime, timezone
 import json
@@ -10,21 +11,22 @@ import time
 import random
 import shutil
 import asyncio
+import pyttsx3
 
+engine = pyttsx3.init()
 
 LINK_REGEX = re.compile(r"(https?://|www\.|discord\.gg/|discord\.com/invite/)")
 
-#token = "MTUypOc"
+#token = ""
 
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 intents.voice_states = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
 cooldowns = {}
 DB_PATH = "data/levels.db"
-BACKUP = "levels_backup.db"
+BACKUP = "lvels_backup.db"
 if not os.path.exists("data"):
     os.makedirs("data")
 
@@ -44,15 +46,24 @@ def init_db():
     conn.commit()
     conn.close()
 
+def backup_db():
+    if os.path.exists(DB_PATH):
+        shutil.copy(DB_PATH, BACKUP)
 
-from discord import app_commands
+def restore_db():
+    if os.path.exists(BACKUP) and not os.path.exists(DB_PATH):
+        shutil.copy(BACKUP, DB_PATH)
 
-@bot.tree.command(name="say", description="Envoie un message dans un salon")
-@app_commands.checks.has_permissions(administrator=True)
-async def say(interaction: discord.Interaction, salon: discord.TextChannel, message: str):
-    message = message.replace("\\n", "\n")
-    await salon.send(message)
-    await interaction.response.send_message("Message envoyé ✅", ephemeral=True)
+class MyBot(commands.Bot):
+    async def setup_hook(self):
+        guild = discord.Object(id=1486065140746027180)
+        self.tree.copy_global_to(guild=guild)
+        synced = await self.tree.sync(guild=guild)
+        print(f"{len(synced)} commande(s) synchronisée(s)")
+        for cmd in synced:
+            print("-", cmd.name)
+
+bot = MyBot(command_prefix="!", intents=intents)
 
 
 
@@ -89,22 +100,7 @@ async def log_message_tickets(bot, guild, message):
 
 @bot.event
 async def on_ready():
-    GUILD_ID = discord.Object(id=1486065140746027180)
-
     for guild in bot.guilds:
-        await bot.tree.sync(guild=GUILD_ID)
-        print("Sync OK serveur")
-        await log_message_bot(bot, guild, f">>> +++++++++++++\nSync OK serveur\n+++++++++++++")
-
-    for guild in bot.guilds:
-        try:
-            synced = await bot.tree.sync()
-            print(f"Synced {len(synced)} command(s)")
-            await log_message_bot(bot, guild, f">>> _____Synced {len(synced)} command(s)\n_____")
-        except Exception as e:
-            print(e)
-    
-
         date = datetime.now(timezone.utc)
 
         bot.add_view(TicketView())
@@ -125,32 +121,6 @@ async def on_disconnect():
 
 
 #------------------COMMANDES DU BOT-----------------------------!ping, !nonpourquoitudiscaslp, !datejoin @membre, !ouvrirunticket etc...
-
-@bot.command()
-async def command(ctx, member: discord.Member = None):
-    
-    embed = discord.Embed(
-    title="VOICI TOUTES LES COMMANDES DU SERVEUR :",
-    description=(
-            "__💬COMMANDES MESSAGES :__\n\n"
-            "--> !ping\n"
-            "--> !nonpourquoitudiscaslp\n"
-            "--> !ntmmmeaubry\n"
-            "--> !soleilterre\n"
-            "--> !ntmlebot\n\n"
-            "__🛠️COMMANDES__\n\n"
-            "➡️ !depuis @...[optionnel] : vous dira la date exact à laquelle vous (ou quelqu'un d'autre) avez rejoint le serveur\n\n"
-            "➡️ !rank @...[optionnel] : vous dira votre rank actuel ou celui de quelqu'un d'autre\n\n"
-            "➡️ leaderboard : vous montrera le leaderboard du système de niveau (non-accurate je le rappelle)\n\n"
-            "➡️ !givexp @... 145 : permet d'ajouter un nombre d'xp choisi à quelqu'un (seulement pour les modos)\n\n"
-            "➡️ !setlevel @... 11 : permet de mettre quelqu'un à un niveau précis, son xp sera reset à 0 (seulement pour les modos)\n\n"
-            "➡️ !ouvrirunticket : permet de faire apparaitre le message pour ouvrir un ticket (seulement pour les modos)\n\n"
-            "➡️ !closeticket : à l'intérieur d'un ticket, permet de fermer un ticket (seulement pour les modos)\n\n"
-            "➡️ !deban id : permet de deban un membre grace à son id (seulement pour les modos)\n"),
-
-    color=discord.Color.from_rgb(255, 255, 255))
-
-    await ctx.send(embed=embed)
 
 @bot.command()
 async def ping(ctx):
@@ -175,10 +145,6 @@ async def soleilterre(ctx):
 @bot.command()
 async def nonpourquoitudiscaslp(ctx):
     await ctx.send("fdp")
-
-@bot.command()
-async def frmtgthomastuclcavctescommandedemrdquiserventarien(ctx):
-    await ctx.send("Respect l'owner stp")
 
 @bot.command()
 async def depuis(ctx, member: discord.Member = None):
@@ -419,17 +385,24 @@ async def setlevel(ctx, member: discord.Member = None, level: int = None):
 @commands.has_permissions(ban_members=True)
 async def deban(ctx, user_id: int, *, reason=None):
     guild = ctx.guild
-    date = datetime.now(timezone.utc)
 
     try:
         user = await bot.fetch_user(user_id)
+
         await guild.unban(user, reason=reason)
+
         await ctx.send(f"✅ {user} a été débanni.")
 
+        # log
         log_channel = discord.utils.get(guild.text_channels, name="logs-join-leave-member")
 
         if log_channel:
-            await log_message_JL(bot, guild, f">>> COMMANDE DEBAN--------\n{date}\n\n**{user}** {user.mention} ({user.id})\nPar : {ctx.author} {ctx.author.mention} ({ctx.author.id})\nRaison : {reason or 'Aucune raison'}\n____")
+            await log_channel.send(
+                f">>> 🔓 UNBAN\n"
+                f"👤 Utilisateur : {user} ({user.id})\n"
+                f"🛠️ Par : {ctx.author}\n"
+                f"📌 Raison : {reason or 'Aucune raison'}"
+            )
 
     except discord.NotFound:
         await ctx.send("❌ Cet utilisateur n'est pas banni.")
@@ -437,6 +410,146 @@ async def deban(ctx, user_id: int, *, reason=None):
         await ctx.send("❌ Je n'ai pas la permission de débannir.")
     except Exception as e:
         await ctx.send(f"❌ Erreur : {e}")
+
+
+@bot.tree.command(name="say", description="Envoie un message dans un salon")
+@app_commands.checks.has_permissions(administrator=True)
+async def say(interaction: discord.Interaction, salon: discord.TextChannel, message: str):
+    message = message.replace("\\n", "\n")
+    await salon.send(message)
+    await interaction.response.send_message("Message envoyé ✅", ephemeral=True)
+
+
+@bot.tree.command(name="botvoc", description="Connecte le bot à votre salon vocal.")
+async def botvoc(interaction: discord.Interaction):
+
+    if interaction.user.voice is None:
+        await interaction.response.send_message(
+            "❌ Vous devez être connecté à un salon vocal.",
+            ephemeral=True
+        )
+        return
+
+    channel = interaction.user.voice.channel
+
+    if interaction.guild.voice_client is not None:
+        await interaction.guild.voice_client.move_to(channel)
+    else:
+        await channel.connect()
+
+    await interaction.response.send_message(
+        f"✅ Je me suis connecté à **{channel.name}**."
+    )
+
+
+@bot.tree.command(name="botdevoc", description="Déconnecte le bot du salon vocal.")
+async def botdevoc(interaction: discord.Interaction):
+    voice_client = interaction.guild.voice_client
+
+    if voice_client is None:
+        await interaction.response.send_message(
+            "❌ Je ne suis connecté à aucun salon vocal.",
+            ephemeral=True
+        )
+        return
+
+    await voice_client.disconnect()
+    await interaction.response.send_message("👋 Je me suis déconnecté du salon vocal.")
+
+
+@bot.tree.command(name="dire", description="Fait parler le bot dans le salon vocal")
+@app_commands.describe(message="Le texte à dire")
+async def dire(interaction: discord.Interaction, message: str):
+
+    # Vérifie que le bot est connecté en vocal
+    voice_client = interaction.guild.voice_client
+
+    if voice_client is None:
+        await interaction.response.send_message(
+            "❌ Je ne suis pas connecté dans un salon vocal.",
+            ephemeral=True
+        )
+        return
+
+    # Empêche de lancer plusieurs sons en même temps
+    if voice_client.is_playing():
+        voice_client.stop()
+
+    # Réponse Discord
+    await interaction.response.send_message(
+        f"🧠 Génération de la réponse vocale...\nMESSAGE : {message}"
+    )
+
+    engine.save_to_file(
+        message,
+        "voix.mp3"
+    )
+
+    engine.runAndWait()
+
+
+    # Lecture dans Discord
+    if voice_client.is_playing():
+        voice_client.stop()
+
+
+    voice_client.play(discord.FFmpegPCMAudio("voix.mp3", executable=r"C:\Users\Thomas\AppData\Local\Microsoft\WinGet\Links\ffmpeg.exe"))
+
+
+@bot.tree.command(name="ban", description="Enlève le ban de quelqu'un")
+@app_commands.checks.has_permissions(ban_members=True)
+async def ban(interaction: discord.Interaction, user_id: str):
+
+    guild = interaction.guild
+
+    try:
+        user = await bot.fetch_user(int(user_id))
+        date = datetime.now(timezone.utc)
+        await guild.ban(user)
+
+        embed1 = discord.Embed(
+            title="BAN",
+            description=f"{date}\n\nBANNI : {user}\n\nPAR : {interaction.user}"
+        )
+
+        await interaction.response.send_message(f"{user} a été banni par {interaction.user}", ephemeral=True)
+        await log_message_bot(embed=embed1)
+
+    except ValueError:
+        await interaction.response.send_message("❌ L'identifiant utilisateur est invalide.", ephemeral=True)
+
+    except discord.NotFound:
+        await interaction.response.send_message("❌ Cet utilisatuer n'est pas banni.", ephemeral=True)
+
+@ban.error
+async def unban_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("❌ Tu n'as pas la permission d'utiliser cette commande.", ephemeral=True)
+    
+
+@bot.tree.command(name="deban", description="Enlève le ban de quelqu'un")
+@app_commands.checks.has_permissions(ban_members=True)
+async def deban(interaction: discord.Interaction, user_id: str):
+    guild = interaction.guild
+
+    try:
+        user = await bot.fetch_user(int(user_id))
+        date = datetime.now(timezone.utc)
+        await guild.unban(user)
+
+        await interaction.response.send_message(f"{user} a été débanni par {interaction.user}", ephemeral=True)
+        await log_message_bot(bot, guild, f">>> 🔓UNBAN\n{date}\n{user} a été débanni par {interaction.user}")
+
+    except ValueError:
+        await interaction.response.send_message("❌ L'identifiant utilisateur est invalide.", ephemeral=True)
+
+    except discord.NotFound:
+        await interaction.response.send_message("❌ Cet utilisatuer n'est pas banni.", ephemeral=True)
+
+@deban.error
+async def unban_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("❌ Tu n'as pas la permission d'utiliser cette commande.", ephemeral=True)
 
 
 
@@ -553,13 +666,27 @@ async def on_member_ban(guild, user):
     salon = discord.utils.get(guild.text_channels, name="logs-join-leave-member")
     date = datetime.now(timezone.utc)
 
+    if user.joined_at is None:
+        return
+    
+    duration = datetime.now(timezone.utc) - user.joined_at
+
+    datejoin = user.joined_at
+    date = datetime.now(timezone.utc)
+
+    days = duration.days
+    hours = duration.seconds //3600
+    minutes = (duration.seconds // 60) % 60
+    seconds = duration.seconds - (((duration.seconds // 60) % 60) * 60)
+    totalseconds = duration.seconds
+
     if not salon:
         return
     
     async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.ban):
         if entry.target.id == user.id:
-            print(f"--> {date}\n\n{user} s'est fait ban par {entry.user}\nRaison : {entry.reason or 'Aucune raison'}\n{guild.member_count} membres à présent\n")
-            await log_message_JL(bot, guild, f">>> -------------BAN-------------\n{date}\n\n{user} ({user.mention}) s'est fait ban par {entry.user}\nRaison : {entry.reason or 'Aucune raison'}\n{guild.member_count} membres à présent\n--------------------------")
+            print(f"--> {date}\n\n{user} s'est fait ban par {entry.user}\nRaison : {entry.reason or 'Aucune raison'}\nRejoint : {datejoin}\nLà depuis {days}j {hours}h {minutes}m {seconds}s\n{totalseconds}s au total\n{user.guild.member_count} membres à présent\n")
+            await log_message_JL(bot, guild, f">>> --------------------------\n{date}\n\n{user} ({user.mention}) s'est fait ban par {entry.user}\nRaison : {entry.reason or 'Aucune raison'}\nRejoint : {datejoin}\nLà depuis {days}j {hours}h {minutes}m {seconds}s\n{totalseconds}s au total\n{user.guild.member_count} membres à présent\n--------------------------")
             return
         
 @bot.event
@@ -567,14 +694,22 @@ async def on_member_unban(guild, user):
     salon = discord.utils.get(guild.text_channels, name="logs-join-leave-member")
     date = datetime.now(timezone.utc)
 
+    if user.joined_at is None:
+        return
+
+    duration = datetime.now(timezone.utc) - user.joined_at
+
+    date = datetime.now(timezone.utc)
+
+
     if not salon:
         return
     
     async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.ban):
         if entry.target.id == user.id:
 
-            print(f"--> {date}\n\n{user} s'est fait deban par {entry.user}\n\n{guild.member_count} membres à présent\n")
-            await log_message_JL(bot, guild, f">>> 🔓UNBAN================\n{date}\n\n**{user}** {user.mention} ({user.id}\n--------------------------")
+            print(f"--> {date}\n\n{user} s'est fait deban par {entry.user}\n\n{user.guild.member_count} membres à présent\n")
+            await log_message_JL(f">>> --------------------------\n{date}\n\n**{user}** ({user.mention}) a été débanni.")
 
 @bot.event
 async def on_member_remove(member):
@@ -608,7 +743,7 @@ async def on_member_remove(member):
             salon = member.guild.get_channel(1523023647781027921)
             if salon:
                 print(f"--> {date}\n\n{member} s'est fait kick par {entry.user}\nRaison : {entry.reason or 'Aucune raison'}\nRejoint : {datejoin}\nLà depuis {days}j {hours}h {minutes}m {seconds}s\n{totalseconds}s au total\n{member.guild.member_count} membres à présent\n")
-                await log_message_JL(bot, guild, f">>> --------------------------\n{date}\n\n{member} ({member.mention}) s'est fait kick par {entry.user}\nRaison : {entry.reason or 'Aucune raison'}\nRejoint : {datejoin}\nLà depuis {days}j {hours}h {minutes}m {seconds}s\n{totalseconds}s au total\n{member.guild.member_count} membres à présent\n--------------------------")
+                await log_message_JL(f">>> --------------------------\n{date}\n\n{member} ({member.mention}) s'est fait kick par {entry.user}\nRaison : {entry.reason or 'Aucune raison'}\nRejoint : {datejoin}\nLà depuis {days}j {hours}h {minutes}m {seconds}s\n{totalseconds}s au total\n{member.guild.member_count} membres à présent\n--------------------------")
 
             return
 
@@ -655,14 +790,14 @@ async def on_voice_state_update(member, before, after):
             await log_message_voc(
                 bot,
                 guild, 
-                f">>> __________________________\n{datetime.now(timezone.utc)}\n\n{member} a rejoint : {after.channel.mention}")
+                f">>> __________________________\n{datetime.now(timezone.utc)}\n\n{member.mention} a rejoint : {after.channel.mention}")
         
     if before.channel and before.channel != after.channel:
         print(f"\n--> {datetime.now(timezone.utc)} {member} a quitté : {before.channel.name}")
         await log_message_voc(
             bot,
             guild,
-            f">>> __________________________\n{datetime.now(timezone.utc)}\n\n{member} a quitté : {before.channel.mention}"
+            f">>> __________________________\n{datetime.now(timezone.utc)}\n\n{member.mention} a quitté : {before.channel.mention}"
         )
         
     if before.channel and before.channel.name.startswith("🔊 vocal-"):
@@ -732,7 +867,7 @@ class TicketView(discord.ui.View):
         await log_message_tickets(
             bot,
             guild, 
-            f">>> ===__OPEN__===\n{datetime.now(timezone.utc)}\n\nTicket créé : {channel.name}\nPar {member}  {member.mention} ({member.id})\nSalon : {channel.mention}\nID salon: {channel.id}"
+            f">>> ===__OPEN__===\n{datetime.now(timezone.utc)}\n\nTicket créé : {channel.name}\nPar {member}\nSalon : {channel.mention}\nID: {channel.id}"
         )
 
         await interaction.followup.send(
@@ -807,7 +942,7 @@ class CloseTicketView(discord.ui.View):
         await log_message_tickets(
             bot,
             guild, 
-            f">>> ---__CLOSE__---\n{datetime.now(timezone.utc)}\n\nTicket fermé : {channel_name}\nPar {interaction.user} {interaction.user.mention} ({interaction.user.id})"
+            f">>> ---__CLOSE__---\n{datetime.now(timezone.utc)}\n\nTicket fermé : {channel_name}\nPar {interaction.user}"
         )
 
         log_channel = discord.utils.get(guild.text_channels, name="backup-tickets")
@@ -967,7 +1102,6 @@ async def on_message(message):
             await channel.send(embed=embed)
 
     await bot.process_commands(message)
-
 
 
 
