@@ -11,9 +11,6 @@ import time
 import random
 import shutil
 import asyncio
-import pyttsx3
-
-engine = pyttsx3.init()
 
 LINK_REGEX = re.compile(r"(https?://|www\.|discord\.gg/|discord\.com/invite/)")
 
@@ -455,45 +452,6 @@ async def botdevoc(interaction: discord.Interaction):
 
     await voice_client.disconnect()
     await interaction.response.send_message("👋 Je me suis déconnecté du salon vocal.")
-
-
-@bot.tree.command(name="dire", description="Fait parler le bot dans le salon vocal")
-@app_commands.describe(message="Le texte à dire")
-async def dire(interaction: discord.Interaction, message: str):
-
-    # Vérifie que le bot est connecté en vocal
-    voice_client = interaction.guild.voice_client
-
-    if voice_client is None:
-        await interaction.response.send_message(
-            "❌ Je ne suis pas connecté dans un salon vocal.",
-            ephemeral=True
-        )
-        return
-
-    # Empêche de lancer plusieurs sons en même temps
-    if voice_client.is_playing():
-        voice_client.stop()
-
-    # Réponse Discord
-    await interaction.response.send_message(
-        f"🧠 Génération de la réponse vocale...\nMESSAGE : {message}"
-    )
-
-    engine.save_to_file(
-        message,
-        "voix.mp3"
-    )
-
-    engine.runAndWait()
-
-
-    # Lecture dans Discord
-    if voice_client.is_playing():
-        voice_client.stop()
-
-
-    voice_client.play(discord.FFmpegPCMAudio("voix.mp3", executable=r"C:\Users\Thomas\AppData\Local\Microsoft\WinGet\Links\ffmpeg.exe"))
 
 
 @bot.tree.command(name="ban", description="Enlève le ban de quelqu'un")
