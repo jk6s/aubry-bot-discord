@@ -1,0 +1,5 @@
+discord.py
+psycopg2-binary
+pyttsx3
+PyNaCl
+davey
